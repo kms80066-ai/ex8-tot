@@ -1,0 +1,24 @@
+# apiVersion: argoproj.io/v1alpha1
+# kind: Application
+
+# metadata:
+#   name: ex8-board
+#   namespace: argocd
+
+# spec:
+#   project: default
+
+#   source:
+#     repoURL: https://github.com/YOUR_GITHUB_NAME/ex8-tot.git
+#     targetRevision: main
+#     path: k8s/apps
+
+#   destination:
+#     server: https://kubernetes.default.svc
+#     namespace: ex8
+
+#   syncPolicy:
+#     automated: {}
+
+#     syncOptions:
+#       - CreateNamespace=true
