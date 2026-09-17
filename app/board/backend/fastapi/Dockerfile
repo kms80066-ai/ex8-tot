@@ -24,7 +24,7 @@ EXPOSE 8000
 
 # 7. 컨테이너 시작할 때 실행할 명령 구성
 # "--reload": 운영 환경에서는 포함하지 않습니다.(개발 환경에서만 사용)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 
 # docker run 예시로 nginx의 포트번호는 conf 파일로 돼있는 반면에 이것은 수정 가능

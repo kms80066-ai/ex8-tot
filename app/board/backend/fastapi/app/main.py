@@ -13,10 +13,13 @@ templates = Jinja2Templates(directory="templates")
 # DB 연결 상태 체크 함수 (추가된 로직)
 def check_db_connection():
     # 환경변수 또는 기본 설정값 (Docker run 시 설정했던 DB 컨테이너 정보)
-    db_host = os.getenv("DB_HOST", "service-mysql")        # 컨테이너 이름 (mynet-bridge 네트워크)
-    db_user = os.getenv("DB_USER", "std09")
-    db_password = os.getenv("DB_PASSWORD", "qwe123")
-    db_name = os.getenv("DB_NAME", "std09")
+    db_host = os.getenv("DB_HOST")
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
+    db_name = os.getenv("DB_NAME")
+    
+    if not all([db_host, db_user, db_password, db_name]):
+    return "NOT CONFIGURED (DB 미연결)"
 
     try:
         # PyMySQL을 통해 DB에 접속 시도

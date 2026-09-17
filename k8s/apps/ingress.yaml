@@ -1,0 +1,37 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+
+metadata:
+  name: board-ingress
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+
+    # ALB 설정
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+
+    # HTTP 80 / HTTPS 443
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+
+    # HTTP → HTTPS
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+    # 실제 ACM 인증서 ARN으로 교체
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:ca-central-1:925047940866:certificate/3352eb5f-ad9a-440d-b66e-0e3528d6a2f6"
+
+    # ALB → Nginx Health Check
+    alb.ingress.kubernetes.io/healthcheck-path: /
+
+spec:
+  ingressClassName: alb
+
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: board-frontend
+                port:
+                  number: 80
