@@ -32,7 +32,7 @@ spec:
     spec:
       containers:
         - name: fastapi
-          image: fastapi:bootstrap
+          image: 925047940866.dkr.ecr.ca-central-1.amazonaws.com/std09-ex8-fastapi:71fe73f21e2183fe574b310c96c7dbe5333cd28b
           ports:
             - containerPort: 8000
 

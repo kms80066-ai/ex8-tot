@@ -32,7 +32,7 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: nginx:bootstrap
+          image: 925047940866.dkr.ecr.ca-central-1.amazonaws.com/std09-ex8-nginx:71fe73f21e2183fe574b310c96c7dbe5333cd28b
           ports:
             - containerPort: 80
 
