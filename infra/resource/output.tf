@@ -29,3 +29,7 @@ output "ecr_repository_urls" {
 output "ecr_registry" {
   value = local.ecr_registry
 }
+
+output "alb_controller_role_arn" {
+  value = aws_iam_role.alb_controller.arn
+}
