@@ -1,4 +1,4 @@
-name: EX8 Board CI
+name: EX8 Infrastructure and Board CI
 
 on:
   push:
@@ -6,25 +6,33 @@ on:
       - main
     paths:
       - "app/board/**"
-      - ".github/workflows/ci.yml"
 
   workflow_dispatch:
+    inputs:
+      apply_infrastructure:
+        description: "Terraform으로 VPC, EKS, ECR 생성/변경"
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: ex8-board-ci
+  group: ex8-infrastructure-and-board
   cancel-in-progress: false
 
 jobs:
-  build-and-push:
+  deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
+      # 1. GitHub 소스 가져오기
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 2. AWS 인증
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -32,30 +40,103 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ca-central-1
 
+      # ================================================
+      # 3. Terraform
+      # 수동 실행 시 체크박스를 선택한 경우에만 실행
+      # ================================================
+      - name: Setup Terraform
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply_infrastructure }}
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform-version: "1.10.5"
+
+      - name: Terraform Init
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply_infrastructure }}
+        run: terraform -chdir=infra/resource init -input=false
+
+      - name: Terraform Validate
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply_infrastructure }}
+        run: terraform -chdir=infra/resource validate
+
+      - name: Terraform Plan
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply_infrastructure }}
+        run: terraform -chdir=infra/resource plan -input=false -out=tfplan
+
+      - name: Terraform Apply
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply_infrastructure }}
+        run: terraform -chdir=infra/resource apply -input=false tfplan
+
+      # ================================================
+      # 4. ECR 및 이미지 빌드
+      # ================================================
+
+      # 이전 커밋으로 실행되는 오래된 작업 방지
+      - name: Check Source Commit
+        run: |
+          set -euo pipefail
+
+          git fetch origin main
+
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "main 브랜치가 변경됐습니다. 최신 main에서 다시 실행하세요."
+            exit 1
+          fi
+
       - name: Login to ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and Push Images
+      # 실행마다 고유한 이미지 태그 생성
+      - name: Set Image Tag
+        run: |
+          echo "IMAGE_TAG=${GITHUB_SHA::12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      # Nginx 및 FastAPI 이미지 빌드
+      - name: Build Images
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
           set -euo pipefail
 
-          NGINX_IMAGE="${REGISTRY}/std09-ex8-nginx:${GITHUB_SHA}"
-          FASTAPI_IMAGE="${REGISTRY}/std09-ex8-fastapi:${GITHUB_SHA}"
+          NGINX_REPO="${REGISTRY}/std09-ex8-nginx"
+          FASTAPI_REPO="${REGISTRY}/std09-ex8-fastapi"
 
           docker build \
-            -t "$NGINX_IMAGE" \
+            -t "${NGINX_REPO}:${IMAGE_TAG}" \
+            -t "${NGINX_REPO}:latest" \
             ./app/board/frontend/nginx
 
           docker build \
-            -t "$FASTAPI_IMAGE" \
+            -t "${FASTAPI_REPO}:${IMAGE_TAG}" \
+            -t "${FASTAPI_REPO}:latest" \
             ./app/board/backend/fastapi
 
-          docker push "$NGINX_IMAGE"
-          docker push "$FASTAPI_IMAGE"
+      # ECR에 고유 태그와 latest 모두 업로드
+      - name: Push Images to ECR
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
 
+          NGINX_REPO="${REGISTRY}/std09-ex8-nginx"
+          FASTAPI_REPO="${REGISTRY}/std09-ex8-fastapi"
+
+          # 오래된 실행이 최신 이미지를 덮어쓰지 않도록 확인
+          git fetch origin main
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "main 브랜치가 변경되어 이미지 업로드를 중단합니다."
+            exit 1
+          fi
+
+          docker push "${NGINX_REPO}:${IMAGE_TAG}"
+          docker push "${FASTAPI_REPO}:${IMAGE_TAG}"
+
+          docker push "${NGINX_REPO}:latest"
+          docker push "${FASTAPI_REPO}:latest"
+
+      # ================================================
+      # 5. Kubernetes 이미지 주소 자동 변경
+      # ================================================
       - name: Update Kubernetes Images
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
@@ -63,16 +144,19 @@ jobs:
           set -euo pipefail
 
           sed -i -E \
-            "s|^([[:space:]]*image:[[:space:]]*).*|\1${REGISTRY}/std09-ex8-nginx:${GITHUB_SHA}|" \
+            "s|^([[:space:]]*image:[[:space:]]*).*|\1${REGISTRY}/std09-ex8-nginx:${IMAGE_TAG}|" \
             k8s/apps/board-frontend.yaml
 
           sed -i -E \
-            "s|^([[:space:]]*image:[[:space:]]*).*|\1${REGISTRY}/std09-ex8-fastapi:${GITHUB_SHA}|" \
+            "s|^([[:space:]]*image:[[:space:]]*).*|\1${REGISTRY}/std09-ex8-fastapi:${IMAGE_TAG}|" \
             k8s/apps/board-backend.yaml
 
           grep 'image:' k8s/apps/board-frontend.yaml
           grep 'image:' k8s/apps/board-backend.yaml
 
+      # ================================================
+      # 6. 변경된 YAML을 GitHub에 자동 반영
+      # ================================================
       - name: Commit Updated Manifests
         run: |
           set -euo pipefail
@@ -86,9 +170,18 @@ jobs:
             k8s/apps/board-backend.yaml
 
           if git diff --cached --quiet; then
+            echo "변경된 이미지 주소가 없습니다."
             exit 0
           fi
 
-          git commit -m "chore: update board images ${GITHUB_SHA}"
+          git commit -m "chore: update board images ${IMAGE_TAG}"
+
+          # 원격 브랜치가 변경되지 않았을 때만 Push
+          git fetch origin main
+
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "main 변경 감지: 강제 Push하지 않고 중단합니다."
+            exit 1
+          fi
 
           git push origin HEAD:main
